@@ -1,0 +1,65 @@
+name: "Build & Test"
+
+on:
+    workflow_call:
+defaults:
+    run:
+        shell: bash  
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-lint:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-Dwarnings"
+      RUSTDOCFLAGS: "-Dwarnings"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Retrieve MSRV
+        id: msrv
+        run: echo "MSRV=$(cat Cargo.toml | grep -Po '(?<=rust-version = ")([\d\.]+)')" >> $GITHUB_OUTPUT
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.MSRV }}
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-rdme
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Fmt
+        run: cargo fmt -- --check
+
+      - name: Build
+        run: cargo build
+
+      - name: Clippy
+        run: cargo clippy
+
+    #   - name: Test WASM compilation
+    #     run: |
+    #       rustup target add wasm32-unknown-unknown
+    #       cargo check --target wasm32-unknown-unknown
+
+      - name: Doc
+        run: cargo doc --no-deps --all-features
+
+      - name: cargo-rdme
+        run: cargo rdme --check --no-fail-on-warnings
+
