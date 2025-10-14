@@ -33,9 +33,15 @@
       }],
       ["@semantic-release/release-notes-generator", { "presetConfig": true }],
       ["@semantic-release/changelog", { "changelogTitle": "# Changelog" }],
+      ["@semantic-release/exec", {
+        "prepareCmd": "cargo install cargo-set-version --version 0.4.0 || true && cargo set-version --exclude Cargo.toml ${nextRelease.version} && cargo package"
+    }],
       ["@semantic-release/git", {
         "assets": ["Cargo.toml", "CHANGELOG.md"],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+      }],
+      ["@semantic-release/exec", {
+        "publishCmd": "cargo publish"
       }],
       ["@semantic-release/github", { "assets": ["target/package/*.crate"] }]
     ]

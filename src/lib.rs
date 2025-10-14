@@ -21,7 +21,7 @@
 //! `cargo test --doc` and tools like `cargo-rdme` reliable.
 //!
 //! ```
-//! use did_resolver_rs::DIDCheqd;
+//! use did_resolver_cheqd::DIDCheqd;
 //!
 //! // Confirm the API constant and that we can construct the value
 //! assert_eq!(DIDCheqd::DID_METHOD_NAME, "cheqd");
@@ -37,10 +37,11 @@
 use crate::resolution::resolver::{DidCheqdResolver, DidCheqdResolverConfiguration};
 use crate::resolution::transformer::cheqd_diddoc_to_json;
 use serde_json::to_vec;
-use ssi_dids_core::resolution::{
-    DIDMethodResolver, Error, Metadata as ResolutionMetadata, Options, Output,
+use ssi_dids_core::{
+    DIDMethod,
+    document::{self, representation::MediaType},
+    resolution::{DIDMethodResolver, Error, Metadata as ResolutionMetadata, Options, Output},
 };
-use ssi_dids_core::{DIDMethod, document, document::representation::MediaType};
 
 pub mod error;
 pub mod proto;

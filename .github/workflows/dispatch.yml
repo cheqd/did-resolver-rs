@@ -24,11 +24,11 @@ jobs:
   #   with:
   #     VERSION: ${{ needs.call-build.outputs.VERSION }}
 
-  # call-release:
-  #   name: "Release"
-  #   needs: [ call-test, call-build ]
-  #   if: ${{ github.ref_protected == true }}
-  #   uses: ./.github/workflows/release.yml
-  #   with:
-  #     RELEASE_VERSION: ${{ needs.call-build.outputs.VERSION }}
-  #   secrets: inherit
+  call-release:
+    name: "Release"
+    # Ensures the release only runs after tests and build are complete
+    needs: [ call-build ]
+    if: ${{ github.ref_protected == true }} 
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+
