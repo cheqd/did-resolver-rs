@@ -1,5 +1,5 @@
 [package]
-name = "did_resolver_cheqd"
+name = "did-resolver-cheqd"
 version = "0.1.0"
 authors = ["Cheqd Foundation Limited (https://github.com/cheqd)"]
 edition = "2024"

@@ -8,12 +8,16 @@ use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use crate::{
     error::{DidCheqdError, DidCheqdResult},
     proto::cheqd::{
-        did::v2::{QueryDidDocRequest, query_client::QueryClient as DidQueryClient},
+        did::v2::{
+            QueryDidDocRequest, QueryDidDocVersionRequest,
+            query_client::QueryClient as DidQueryClient,
+        },
         resource::v2::{
             Metadata as CheqdResourceMetadata, QueryCollectionResourcesRequest,
             QueryResourceRequest, query_client::QueryClient as ResourceQueryClient,
         },
     },
+    resolution::parser::DidCheqdParsed,
 };
 
 /// default namespace for the cheqd "mainnet". as it would appear in a DID.
@@ -48,6 +52,23 @@ pub struct NetworkConfiguration {
     pub grpc_url: String,
     /// the namespace of the network - as it would appear in a DID (did:cheqd:namespace:123)
     pub namespace: String,
+}
+
+impl Clone for NetworkConfiguration {
+    fn clone(&self) -> Self {
+        Self {
+            grpc_url: self.grpc_url.clone(),
+            namespace: self.namespace.clone(),
+        }
+    }
+}
+
+impl Clone for DidCheqdResolverConfiguration {
+    fn clone(&self) -> Self {
+        Self {
+            networks: self.networks.clone(),
+        }
+    }
 }
 
 impl NetworkConfiguration {
@@ -137,45 +158,54 @@ impl DidCheqdResolver {
     /// Returns the raw proto DIDDoc and an optional proto metadata object.
     pub async fn query_did_doc_by_str(
         &self,
-        did_str: &str,
+        _did_str: &str,
+        parsed_did: DidCheqdParsed,
     ) -> DidCheqdResult<(
         crate::proto::cheqd::did::v2::DidDoc,
         Option<crate::proto::cheqd::did::v2::Metadata>,
     )> {
-        // parse did string: expect `did:cheqd[:namespace]:id` (namespace optional)
-        if !did_str.starts_with("did:cheqd:") {
-            return Err(DidCheqdError::MethodNotSupported(format!(
-                "not a did:cheqd: {did_str}"
-            )));
-        }
-
-        let rest = &did_str["did:cheqd:".len()..];
-        // if rest contains a colon, treat left part as namespace
-        let (network, _) = if let Some((ns, id)) = rest.split_once(':') {
-            (ns, id.to_string())
-        } else {
-            (MAINNET_NAMESPACE, rest.to_string())
-        };
-
+        // parsed.namespace is an owned String; borrow as &str for client lookup
+        let network = parsed_did.namespace.as_str();
         let mut client = self.client_for_network(network).await?;
-        let request = tonic::Request::new(QueryDidDocRequest {
-            id: did_str.to_string(),
-        });
-        let response = client
-            .did
-            .did_doc(request)
-            .await
-            .map_err(|e| DidCheqdError::NonSuccessResponse(Box::new(e)))?;
 
-        let query_response = response.into_inner();
-        let query_doc_res = query_response.value.ok_or(DidCheqdError::InvalidResponse(
-            "DIDDoc query did not return a value".into(),
-        ))?;
-        let query_doc = query_doc_res.did_doc.ok_or(DidCheqdError::InvalidResponse(
-            "DIDDoc query did not return a DIDDoc".into(),
-        ))?;
+        if parsed_did.version.is_some() {
+            let request = tonic::Request::new(QueryDidDocVersionRequest {
+                id: parsed_did.did.to_string(),
+                version: parsed_did.version.unwrap(),
+            });
+            let response = client
+                .did
+                .did_doc_version(request)
+                .await
+                .map_err(|e| DidCheqdError::NonSuccessResponse(Box::new(e)))?;
+            let query_response = response.into_inner();
+            let query_doc_res = query_response.value.ok_or(DidCheqdError::InvalidResponse(
+                "DIDDoc query did version not return a value".into(),
+            ))?;
+            let query_doc = query_doc_res.did_doc.ok_or(DidCheqdError::InvalidResponse(
+                "DIDDoc query did version not return a DIDDoc".into(),
+            ))?;
 
-        Ok((query_doc, query_doc_res.metadata))
+            Ok((query_doc, query_doc_res.metadata))
+        } else {
+            let request = tonic::Request::new(QueryDidDocRequest {
+                id: parsed_did.did.to_string(),
+            });
+            let response = client
+                .did
+                .did_doc(request)
+                .await
+                .map_err(|e| DidCheqdError::NonSuccessResponse(Box::new(e)))?;
+            let query_response = response.into_inner();
+            let query_doc_res = query_response.value.ok_or(DidCheqdError::InvalidResponse(
+                "DIDDoc query did not return a value".into(),
+            ))?;
+            let query_doc = query_doc_res.did_doc.ok_or(DidCheqdError::InvalidResponse(
+                "DIDDoc query did not return a DIDDoc".into(),
+            ))?;
+
+            Ok((query_doc, query_doc_res.metadata))
+        }
     }
 
     /// Query a DID resource by a DID URL string and return raw bytes and optional
@@ -184,42 +214,31 @@ impl DidCheqdResolver {
     /// * `did:cheqd:<namespace>:<did>?resourceName=...&resourceType=...&resourceVersionTime=...`
     pub async fn query_resource_by_str(
         &self,
-        url_str: &str,
+        did_url: &str,
+        parsed_did: DidCheqdParsed,
     ) -> DidCheqdResult<(Vec<u8>, Option<String>)> {
-        // Use the central parser to extract namespace, id, query and optional version.
-        let parsed = match crate::resolution::parser::DidCheqdParser::parse(url_str) {
-            Ok(p) => p,
-            Err(e) => {
-                // If the input doesn't start with the expected prefix, report MethodNotSupported
-                if !url_str.starts_with("did:cheqd:") {
-                    return Err(DidCheqdError::MethodNotSupported(e));
-                } else {
-                    return Err(DidCheqdError::InvalidDidUrl(e));
-                }
-            }
-        };
-
-        let network = parsed.namespace;
-        let did_id = parsed.id.to_string();
+        // borrow the owned Strings for local use
+        let network = parsed_did.namespace.as_str();
+        let did_id = parsed_did.id.as_str();
 
         // If parser injected a resourceId (from a path like /resources/<id>), resolve by id.
-        if let Some(ref qmap) = parsed.query {
+        if let Some(ref qmap) = parsed_did.query {
             if let Some(resource_id) = qmap.get("resourceId") {
                 return self
-                    .resolve_resource_by_id(&did_id, resource_id, network)
+                    .resolve_resource_by_id(did_id, resource_id.as_str(), network)
                     .await;
             }
         }
 
         // Otherwise, if query parameters indicate name+type lookup, perform that
-        if let Some(qmap) = parsed.query {
+        if let Some(qmap) = parsed_did.query {
             let resource_name = qmap.get("resourceName");
             let resource_type = qmap.get("resourceType");
             let version_time = qmap.get("resourceVersionTime");
 
             let (Some(resource_name), Some(resource_type)) = (resource_name, resource_type) else {
                 return Err(DidCheqdError::InvalidDidUrl(format!(
-                    "Resolver can only resolve by exact resource ID or name+type combination {url_str}"
+                    "Resolver can only resolve by exact resource ID or name+type combination {did_url}"
                 )));
             };
 
@@ -232,9 +251,9 @@ impl DidCheqdResolver {
 
             return self
                 .resolve_resource_by_name_type_and_time(
-                    &did_id,
-                    resource_name,
-                    resource_type,
+                    did_id,
+                    resource_name.as_str(),
+                    resource_type.as_str(),
                     version_time,
                     network,
                 )
@@ -242,7 +261,7 @@ impl DidCheqdResolver {
         }
 
         Err(DidCheqdError::InvalidDidUrl(format!(
-            "No resource path or query present: {url_str}"
+            "No resource path or query present: {did_url}"
         )))
     }
 
@@ -401,21 +420,18 @@ fn find_resource_just_before_time<'a>(
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
+    use crate::resolution::parser::DidCheqdParser;
 
-    #[tokio::test]
-    async fn test_resolve_fails_if_wrong_method() {
-        let did = "did:notcheqd:abc";
-        let resolver = DidCheqdResolver::new(Default::default());
-        let e = resolver.query_did_doc_by_str(did).await.unwrap_err();
-        assert!(matches!(e, DidCheqdError::MethodNotSupported(_)));
-    }
+    use super::*;
 
     #[tokio::test]
     async fn test_resolve_fails_if_no_network_config() {
         let did = "did:cheqd:devnet:Ps1ysXP2Ae6GBfxNhNQNKN";
         let resolver = DidCheqdResolver::new(Default::default());
-        let e = resolver.query_did_doc_by_str(did).await.unwrap_err();
+        let e = resolver
+            .query_did_doc_by_str(did, DidCheqdParser::parse(did).unwrap())
+            .await
+            .unwrap_err();
         assert!(matches!(e, DidCheqdError::NetworkNotSupported(_)));
     }
 
@@ -430,31 +446,21 @@ mod unit_tests {
         };
 
         let resolver = DidCheqdResolver::new(config);
-        let e = resolver.query_did_doc_by_str(did).await.unwrap_err();
+        let e = resolver
+            .query_did_doc_by_str(did, DidCheqdParser::parse(did).unwrap())
+            .await
+            .unwrap_err();
         assert!(matches!(e, DidCheqdError::BadConfiguration(_)));
-    }
-
-    #[tokio::test]
-    async fn test_resolve_resource_fails_if_wrong_method() {
-        let url = "did:notcheqd:zF7rhDBfUt9d1gJPjx7s1J/resources/123";
-        let resolver = DidCheqdResolver::new(Default::default());
-        let e = resolver.query_resource_by_str(url).await.unwrap_err();
-        assert!(matches!(e, DidCheqdError::MethodNotSupported(_)));
-    }
-
-    #[tokio::test]
-    async fn test_resolve_resource_fails_if_wrong_path() {
-        let url = "did:cheqd:mainnet:zF7rhDBfUt9d1gJPjx7s1J/resource/123";
-        let resolver = DidCheqdResolver::new(Default::default());
-        let e = resolver.query_resource_by_str(url).await.unwrap_err();
-        assert!(matches!(e, DidCheqdError::InvalidDidUrl(_)));
     }
 
     #[tokio::test]
     async fn test_resolve_resource_fails_if_no_query() {
         let url = "did:cheqd:mainnet:zF7rhDBfUt9d1gJPjx7s1J";
         let resolver = DidCheqdResolver::new(Default::default());
-        let e = resolver.query_resource_by_str(url).await.unwrap_err();
+        let e = resolver
+            .query_resource_by_str(url, DidCheqdParser::parse(url).unwrap())
+            .await
+            .unwrap_err();
         assert!(matches!(e, DidCheqdError::InvalidDidUrl(_)));
     }
 
@@ -462,7 +468,10 @@ mod unit_tests {
     async fn test_resolve_resource_fails_if_incomplete_query() {
         let url = "did:cheqd:mainnet:zF7rhDBfUt9d1gJPjx7s1j?resourceName=asdf";
         let resolver = DidCheqdResolver::new(Default::default());
-        let e = resolver.query_resource_by_str(url).await.unwrap_err();
+        let e = resolver
+            .query_resource_by_str(url, DidCheqdParser::parse(url).unwrap())
+            .await
+            .unwrap_err();
         assert!(matches!(e, DidCheqdError::InvalidDidUrl(_)));
     }
 
@@ -471,7 +480,10 @@ mod unit_tests {
         // use epoch instead of XML DateTime
         let url = "did:cheqd:mainnet:zF7rhDBfUt9d1gJPjx7s1J?resourceName=asdf&resourceType=fdsa&resourceVersionTime=12341234";
         let resolver = DidCheqdResolver::new(Default::default());
-        let e = resolver.query_resource_by_str(url).await.unwrap_err();
+        let e = resolver
+            .query_resource_by_str(url, DidCheqdParser::parse(url).unwrap())
+            .await
+            .unwrap_err();
         assert!(matches!(e, DidCheqdError::InvalidDidUrl(_)));
     }
 
@@ -480,7 +492,45 @@ mod unit_tests {
         // use epoch instead of XML DateTime
         let did = "did:cheqd:testnet:f5101dd8-447f-40a7-a9b8-700abeba389a".to_string();
         let resolver = DidCheqdResolver::new(Default::default());
-        let res = resolver.query_did_doc_by_str(&did).await;
+        let res = resolver
+            .query_did_doc_by_str(&did, DidCheqdParser::parse(&did).unwrap())
+            .await;
+        println!("res: {res:?}");
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_resource_id_success() {
+        // use epoch instead of XML DateTime
+        let did_url = "did:cheqd:testnet:f5101dd8-447f-40a7-a9b8-700abeba389a/resources/6155f8bc-d9c9-4e83-a1bb-453744fe5438".to_string();
+        let resolver = DidCheqdResolver::new(Default::default());
+        let res = resolver
+            .query_resource_by_str(&did_url, DidCheqdParser::parse(&did_url).unwrap())
+            .await;
+        println!("res: {res:?}");
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_resource_query_success() {
+        // use epoch instead of XML DateTime
+        let did_url = "did:cheqd:testnet:f5101dd8-447f-40a7-a9b8-700abeba389a?resourceName=Patient ID 85905-Schema&resourceType=anonCredsSchema".to_string();
+        let resolver = DidCheqdResolver::new(Default::default());
+        let res = resolver
+            .query_resource_by_str(&did_url, DidCheqdParser::parse(&did_url).unwrap())
+            .await;
+        println!("res: {res:?}");
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_did_version_id() {
+        // use epoch instead of XML DateTime
+        let did = "did:cheqd:testnet:ac2b9027-ec1a-4ee2-aad1-1e316e7d6f59/versions/ff82cc93-25fd-493a-8896-9303a9c8383d".to_string();
+        let resolver = DidCheqdResolver::new(Default::default());
+        let res = resolver
+            .query_did_doc_by_str(&did, DidCheqdParser::parse(&did).unwrap())
+            .await;
         println!("res: {res:?}");
         assert!(res.is_ok());
     }
