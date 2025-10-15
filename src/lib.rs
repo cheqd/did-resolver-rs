@@ -34,13 +34,15 @@
 //! - Implements a `DIDMethodResolver` for the `did:cheqd` DID method.
 //! - Exposes `resolution`, `proto` and `error` modules for integration.
 
+use crate::resolution::parser::DidCheqdParser;
 use crate::resolution::resolver::{DidCheqdResolver, DidCheqdResolverConfiguration};
 use crate::resolution::transformer::cheqd_diddoc_to_json;
 use serde_json::to_vec;
+use ssi_dids_core::DIDResolver;
 use ssi_dids_core::{
     DIDMethod,
     document::{self, representation::MediaType},
-    resolution::{DIDMethodResolver, Error, Metadata as ResolutionMetadata, Options, Output},
+    resolution::{Error, Metadata as ResolutionMetadata, Options, Output},
 };
 
 pub mod error;
@@ -65,10 +67,10 @@ impl DIDMethod for DIDCheqd {
     const DID_METHOD_NAME: &'static str = "cheqd";
 }
 
-impl DIDMethodResolver for DIDCheqd {
-    async fn resolve_method_representation<'a>(
+impl DIDResolver for DIDCheqd {
+    async fn resolve_representation<'a>(
         &'a self,
-        method_specific_id: &'a str,
+        did: &'a ssi_dids_core::DID,
         options: Options,
     ) -> Result<Output<Vec<u8>>, Error> {
         // Try parse as a DID URL (resource) first, otherwise as a DID
@@ -77,12 +79,13 @@ impl DIDMethodResolver for DIDCheqd {
         let cfg = DidCheqdResolverConfiguration::default();
         let resolver = DidCheqdResolver::new(cfg);
 
-        // decide if it's a DidUrl (resource) or a plain DID. We interpret a
-        // DID resource when the input contains `/` or `?` characters, otherwise
-        // treat it as a method-specific id to be combined with the did:cheqd prefix.
-        if method_specific_id.contains('/') || method_specific_id.contains('?') {
+        // Check if it's a DidUrl (resource)
+        let parsed = DidCheqdParser::parse(did)
+            .map_err(|e| Error::InvalidMethodSpecificId(e.to_string()))?;
+
+        if parsed.query.is_some() {
             // treat as a full did URL
-            match resolver.query_resource_by_str(method_specific_id).await {
+            match resolver.query_resource_by_str(did).await {
                 Ok((content_bytes, media_type)) => {
                     return Ok(Output::new(
                         content_bytes,
@@ -94,9 +97,7 @@ impl DIDMethodResolver for DIDCheqd {
             }
         }
 
-        // treat as a did (method specific id)
-        let did_str = format!("did:cheqd:{}", method_specific_id);
-        match resolver.query_did_doc_by_str(&did_str).await {
+        match resolver.query_did_doc_by_str(&did).await {
             Ok((proto_doc, metadata)) => {
                 // convert proto DIDDoc to a JSON representation and serialize
                 let json_value = cheqd_diddoc_to_json(proto_doc)

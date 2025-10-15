@@ -186,59 +186,36 @@ impl DidCheqdResolver {
         &self,
         url_str: &str,
     ) -> DidCheqdResult<(Vec<u8>, Option<String>)> {
-        // ensure prefix
-        if !url_str.starts_with("did:cheqd:") {
-            return Err(DidCheqdError::MethodNotSupported(format!(
-                "not a did:cheqd URL: {url_str}"
-            )));
-        }
-
-        // split off query string
-        let (base, query_opt) = match url_str.split_once('?') {
-            Some((b, q)) => (b, Some(q)),
-            None => (url_str, None),
+        // Use the central parser to extract namespace, id, query and optional version.
+        let parsed = match crate::resolution::parser::DidCheqdParser::parse(url_str) {
+            Ok(p) => p,
+            Err(e) => {
+                // If the input doesn't start with the expected prefix, report MethodNotSupported
+                if !url_str.starts_with("did:cheqd:") {
+                    return Err(DidCheqdError::MethodNotSupported(e));
+                } else {
+                    return Err(DidCheqdError::InvalidDidUrl(e));
+                }
+            }
         };
 
-        // remove prefix
-        let rest = &base["did:cheqd:".len()..];
+        let network = parsed.namespace;
+        let did_id = parsed.id.to_string();
 
-        // extract path (e.g., "/resources/<id>") if present
-        let (did_part, path_opt) = match rest.split_once('/') {
-            Some((d, p)) => (d, Some(format!("/{p}"))),
-            None => (rest, None),
-        };
-
-        // extract network and did id
-        let (network, did_id) = if let Some((ns, id)) = did_part.split_once(':') {
-            (ns, id.to_string())
-        } else {
-            (MAINNET_NAMESPACE, did_part.to_string())
-        };
-
-        // 1. If path is present and is /resources/<id>, resolve by id
-        if let Some(path) = path_opt {
-            if let Some(resource_id) = path.strip_prefix("/resources/") {
+        // If parser injected a resourceId (from a path like /resources/<id>), resolve by id.
+        if let Some(ref qmap) = parsed.query {
+            if let Some(resource_id) = qmap.get("resourceId") {
                 return self
                     .resolve_resource_by_id(&did_id, resource_id, network)
                     .await;
-            } else {
-                return Err(DidCheqdError::InvalidDidUrl(format!(
-                    "DID Resource URL has a path without `/resources/`: {path}"
-                )));
             }
         }
 
-        // 2. If query parameters present, expect resourceName & resourceType (and optional versionTime)
-        if let Some(qs) = query_opt {
-            let params: HashMap<_, _> = qs
-                .split('&')
-                .filter_map(|kv| kv.split_once('='))
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
-
-            let resource_name = params.get("resourceName");
-            let resource_type = params.get("resourceType");
-            let version_time = params.get("resourceVersionTime");
+        // Otherwise, if query parameters indicate name+type lookup, perform that
+        if let Some(qmap) = parsed.query {
+            let resource_name = qmap.get("resourceName");
+            let resource_type = qmap.get("resourceType");
+            let version_time = qmap.get("resourceVersionTime");
 
             let (Some(resource_name), Some(resource_type)) = (resource_name, resource_type) else {
                 return Err(DidCheqdError::InvalidDidUrl(format!(
