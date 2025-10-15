@@ -34,7 +34,7 @@
       ["@semantic-release/release-notes-generator", { "presetConfig": true }],
       ["@semantic-release/changelog", { "changelogTitle": "# Changelog" }],
       ["@semantic-release/exec", {
-        "prepareCmd": "cargo install cargo-set-version --version 0.4.0 || true && cargo set-version --exclude Cargo.toml ${nextRelease.version} && cargo package"
+        "prepareCmd": "cargo install cargo-set-version || true && cargo set-version ${nextRelease.version}"
     }],
       ["@semantic-release/git", {
         "assets": ["Cargo.toml", "CHANGELOG.md"],

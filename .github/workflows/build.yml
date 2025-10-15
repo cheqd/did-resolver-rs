@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-lint:
+  build-and-test:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     env:
@@ -24,7 +24,7 @@ jobs:
 
       - name: Retrieve MSRV
         id: msrv
-        run: echo "MSRV=$(cat Cargo.toml | grep -Po '(?<=rust-version = ")([\d\.]+)')" >> $GITHUB_OUTPUT
+        run: echo "MSRV=$(grep -Po '(?<=rust-version = ")([\d\.]+)' Cargo.toml)" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -38,28 +38,19 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-rdme
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny
+          tool: cargo-rdme, cargo-nextest
 
       - name: Fmt
-        run: cargo fmt -- --check
+        run: cargo fmt --check
 
-      - name: Build
-        run: cargo build
+      - name: Clippy & Build
+        run: cargo clippy --all-targets --all-features --workspace -- -Dwarnings
 
-      - name: Clippy
-        run: cargo clippy
-
-    #   - name: Test WASM compilation
-    #     run: |
-    #       rustup target add wasm32-unknown-unknown
-    #       cargo check --target wasm32-unknown-unknown
+      - name: Test
+        run: cargo nextest run --all-features --all-targets --workspace
 
       - name: Doc
         run: cargo doc --no-deps --all-features
 
       - name: cargo-rdme
         run: cargo rdme --check --no-fail-on-warnings
-

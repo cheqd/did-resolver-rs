@@ -40,7 +40,7 @@ or custom nodes can be opt-in by supplying a different gRPC URL configuration.
 
 This crate uses gRPC types and clients generated using [tonic](https://github.com/hyperium/tonic).
 The generated rust code is checked-in to this repository for monitoring, [see here](./src/proto/mod.rs).
-These generated rust files are checked-in alongside the V2 cheqd proto files & dependencies, [here](./cheqd_proto_gen/proto/),
+These generated rust files are checked-in alongside the V2 cheqd proto files & dependencies.
 which are sourced from [cheqd's Buf registry](https://buf.build/cheqd/proto/docs).
 
 Since the generated code & proto files are not relatively large nor overwhelming in content, they are checked-in rather than pulled and/or generated at build time. The benefit is that the contents of the files can be monitored with each update, making supply-chain attacks obvious. It also reduces the build time complexity for consumers - such as reducing requirements for any 3rd party build tools to be installed (`protobuf`). The drawback is that it introduces some more manual maintainence.
@@ -49,24 +49,32 @@ The crate exports the `DIDCheqd` type which implements the
 [`ssi_dids_core::resolution::DIDMethodResolver`] traits. This crate is
 uses cheqd network's GRPC
 
-####Quick example
--------------
+##### Example
+
 The example below is intentionally minimal and self-contained so it can be
 executed as a doc-test (no network calls, no async runtime). It verifies the
 public associated constant and basic construction of the type. This keeps
 `cargo test --doc` and tools like `cargo-rdme` reliable.
 
 ```rust
-use did_resolver_rs::DIDCheqd;
-
+use did_resolver_cheqd::DIDCheqd;
+use ssi_dids_core::DIDMethod;
 // Confirm the API constant and that we can construct the value
 assert_eq!(DIDCheqd::DID_METHOD_NAME, "cheqd");
-let _ = DIDCheqd::new();
 let _ = DIDCheqd::default();
+let _ = DIDCheqd::new(None);
+let _ = DIDCheqd::new(Some(DidCheqdResolverConfiguration {
+    networks: vec![
+        NetworkConfiguration {
+            grpc_url: "https://grpc.cheqd.net:443".to_string(),
+            namespace: "mainnet".to_string(),
+        },
+    ],
+}));
 ```
 
-####Library features
-----------------
+##### Library features
+
 - Implements a `DIDMethodResolver` for the `did:cheqd` DID method.
 - Exposes `resolution`, `proto` and `error` modules for integration.
 

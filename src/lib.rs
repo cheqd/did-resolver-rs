@@ -4,7 +4,7 @@
 //!
 //! This crate uses gRPC types and clients generated using [tonic](https://github.com/hyperium/tonic).
 //! The generated rust code is checked-in to this repository for monitoring, [see here](./src/proto/mod.rs).
-//! These generated rust files are checked-in alongside the V2 cheqd proto files & dependencies, [here](./cheqd_proto_gen/proto/),
+//! These generated rust files are checked-in alongside the V2 cheqd proto files & dependencies.
 //! which are sourced from [cheqd's Buf registry](https://buf.build/cheqd/proto/docs).
 //!
 //! Since the generated code & proto files are not relatively large nor overwhelming in content, they are checked-in rather than pulled and/or generated at build time. The benefit is that the contents of the files can be monitored with each update, making supply-chain attacks obvious. It also reduces the build time complexity for consumers - such as reducing requirements for any 3rd party build tools to be installed (`protobuf`). The drawback is that it introduces some more manual maintainence.
@@ -13,8 +13,8 @@
 //! [`ssi_dids_core::resolution::DIDMethodResolver`] traits. This crate is
 //! uses cheqd network's GRPC
 //!
-//! Quick example
-//! -------------
+//! # Example
+//!
 //! The example below is intentionally minimal and self-contained so it can be
 //! executed as a doc-test (no network calls, no async runtime). It verifies the
 //! public associated constant and basic construction of the type. This keeps
@@ -22,15 +22,23 @@
 //!
 //! ```
 //! use did_resolver_cheqd::DIDCheqd;
-//!
+//! use ssi_dids_core::DIDMethod;
 //! // Confirm the API constant and that we can construct the value
 //! assert_eq!(DIDCheqd::DID_METHOD_NAME, "cheqd");
-//! let _ = DIDCheqd::new();
 //! let _ = DIDCheqd::default();
+//! let _ = DIDCheqd::new(None);
+//! let _ = DIDCheqd::new(Some(DidCheqdResolverConfiguration {
+//!     networks: vec![
+//!         NetworkConfiguration {
+//!             grpc_url: "https://grpc.cheqd.net:443".to_string(),
+//!             namespace: "mainnet".to_string(),
+//!         },
+//!     ],
+//! }));
 //! ```
 //!
-//! Library features
-//! ----------------
+//! # Library features
+//!
 //! - Implements a `DIDMethodResolver` for the `did:cheqd` DID method.
 //! - Exposes `resolution`, `proto` and `error` modules for integration.
 
@@ -38,9 +46,8 @@ use crate::resolution::parser::DidCheqdParser;
 use crate::resolution::resolver::{DidCheqdResolver, DidCheqdResolverConfiguration};
 use crate::resolution::transformer::cheqd_diddoc_to_json;
 use serde_json::to_vec;
-use ssi_dids_core::DIDResolver;
 use ssi_dids_core::{
-    DIDMethod,
+    DIDMethod, DIDResolver,
     document::{self, representation::MediaType},
     resolution::{Error, Metadata as ResolutionMetadata, Options, Output},
 };
@@ -49,17 +56,24 @@ pub mod error;
 pub mod proto;
 pub mod resolution;
 
-pub struct DIDCheqd;
+pub struct DIDCheqd {
+    /// Resolver configuration used when resolving DIDs/resources.
+    pub config: DidCheqdResolverConfiguration,
+}
 
 impl DIDCheqd {
-    pub fn new() -> Self {
-        DIDCheqd
+    /// Create a resolver using an optional custom configuration.
+    /// If `None` is provided, it defaults to `DidCheqdResolverConfiguration::default()`.
+    pub fn new(config: Option<DidCheqdResolverConfiguration>) -> Self {
+        Self {
+            config: config.unwrap_or_default(),
+        }
     }
 }
 
 impl Default for DIDCheqd {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -76,16 +90,17 @@ impl DIDResolver for DIDCheqd {
         // Try parse as a DID URL (resource) first, otherwise as a DID
         // We will use the internal cheqd resolver to fetch a DidDocument or a resource and
         // then convert it into bytes (JSON-LD) to match the did:key style Output.
-        let cfg = DidCheqdResolverConfiguration::default();
+        // Use the resolver configuration provided to this DIDCheqd instance.
+        let cfg = self.config.clone();
         let resolver = DidCheqdResolver::new(cfg);
 
         // Check if it's a DidUrl (resource)
-        let parsed = DidCheqdParser::parse(did)
+        let parsed = DidCheqdParser::parse(did.as_str())
             .map_err(|e| Error::InvalidMethodSpecificId(e.to_string()))?;
 
         if parsed.query.is_some() {
             // treat as a full did URL
-            match resolver.query_resource_by_str(did).await {
+            match resolver.query_resource_by_str(did.as_str(), parsed).await {
                 Ok((content_bytes, media_type)) => {
                     return Ok(Output::new(
                         content_bytes,
@@ -97,7 +112,7 @@ impl DIDResolver for DIDCheqd {
             }
         }
 
-        match resolver.query_did_doc_by_str(&did).await {
+        match resolver.query_did_doc_by_str(did.as_str(), parsed).await {
             Ok((proto_doc, metadata)) => {
                 // convert proto DIDDoc to a JSON representation and serialize
                 let json_value = cheqd_diddoc_to_json(proto_doc)
