@@ -1,5 +1,7 @@
 # Changelog
 
+## [1.0.1](https://github.com/cheqd/did-resolver-rs/compare/1.0.0...1.0.1) (2025-10-21)
+
 ## 1.0.0 (2025-10-21)
 
 ### Features

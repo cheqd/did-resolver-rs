@@ -1,6 +1,6 @@
 [package]
 name = "did-resolver-cheqd"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Cheqd Foundation Limited (https://github.com/cheqd)"]
 edition = "2024"
 license = "Apache-2.0"
