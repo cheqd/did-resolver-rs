@@ -104,26 +104,74 @@ pub fn cheqd_diddoc_to_json(value: CheqdDidDoc) -> Result<Value, DidCheqdError> 
             Value::Array(value.key_agreement.into_iter().map(Value::String).collect());
     }
 
-    // services
     if !value.service.is_empty() {
         let services: Vec<Value> = value
             .service
             .into_iter()
             .map(|svc| {
                 let mut o = serde_json::Map::new();
+
+                // required fields
                 o.insert("id".to_string(), Value::String(svc.id));
                 o.insert(
                     "type".to_string(),
                     serde_json::from_value(json!(svc.service_type))
                         .unwrap_or(Value::String(svc.service_type)),
                 );
-                // endpoint may be multiple; take first for compatibility
-                if let Some(ep) = svc.service_endpoint.into_iter().next() {
-                    o.insert("serviceEndpoint".to_string(), Value::String(ep));
+
+                // serviceEndpoint (single or multiple)
+                if !svc.service_endpoint.is_empty() {
+                    if svc.service_endpoint.len() == 1 {
+                        o.insert(
+                            "serviceEndpoint".to_string(),
+                            Value::String(svc.service_endpoint[0].clone()),
+                        );
+                    } else {
+                        o.insert(
+                            "serviceEndpoint".to_string(),
+                            Value::Array(
+                                svc.service_endpoint
+                                    .into_iter()
+                                    .map(Value::String)
+                                    .collect(),
+                            ),
+                        );
+                    }
                 }
+
+                // recipientKeys
+                if !svc.recipient_keys.is_empty() {
+                    o.insert(
+                        "recipientKeys".to_string(),
+                        Value::Array(svc.recipient_keys.into_iter().map(Value::String).collect()),
+                    );
+                }
+
+                // routingKeys
+                if !svc.routing_keys.is_empty() {
+                    o.insert(
+                        "routingKeys".to_string(),
+                        Value::Array(svc.routing_keys.into_iter().map(Value::String).collect()),
+                    );
+                }
+
+                // accept
+                if !svc.accept.is_empty() {
+                    o.insert(
+                        "accept".to_string(),
+                        Value::Array(svc.accept.into_iter().map(Value::String).collect()),
+                    );
+                }
+
+                // priority
+                if svc.priority != 0 {
+                    o.insert("priority".to_string(), Value::Number(svc.priority.into()));
+                }
+
                 Value::Object(o)
             })
             .collect();
+
         doc["service"] = Value::Array(services);
     }
 

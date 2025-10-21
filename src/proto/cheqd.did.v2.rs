@@ -50,7 +50,7 @@ pub struct DidDoc {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VerificationMethod {
     /// id is the unique identifier of the verification method.
-    /// Format: did:cheqd:`<namespace>`:`<unique-identifier>#<key-id>`
+    /// Format: did:cheqd:`<namespace>`:`<unique-identifier>`#`<key-id>`
     #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
     /// type is the type of the verification method.
@@ -82,6 +82,21 @@ pub struct Service {
     /// Example: <https://example.com/endpoint>
     #[prost(string, repeated, tag = "3")]
     pub service_endpoint: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// recipient key identify the recipient’s public encryption keys
+    /// Format: did:cheqd:`<namespace>`:`<unique-identifier>`#`<key-id>` or did:key:`<identifier>`
+    #[prost(string, repeated, tag = "4")]
+    pub recipient_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// routing keys contain a list of mediator or relay keys
+    /// Format: did:cheqd:`<namespace>`:`<unique-identifier>`#`<key-id>` or did:key:`<identifier>`
+    #[prost(string, repeated, tag = "5")]
+    pub routing_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// accept: list of MIME types or protocol formats the service supports.
+    /// format: \["didcomm/v2", "didcomm/v1"\]
+    #[prost(string, repeated, tag = "6")]
+    pub accept: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// priority: An integer defining the priority of this service entry.
+    #[prost(uint32, tag = "7")]
+    pub priority: u32,
 }
 /// DidDocWithMetadata defines a DID Document with metadata, as defined in the DID Core specification.
 /// Contains the DID Document, as well as DID Document metadata.

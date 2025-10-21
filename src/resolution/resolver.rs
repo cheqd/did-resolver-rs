@@ -495,7 +495,7 @@ mod unit_tests {
         let res = resolver
             .query_did_doc_by_str(&did, DidCheqdParser::parse(&did).unwrap())
             .await;
-        println!("res: {res:?}");
+        println!("res: {:#?}", res);
         assert!(res.is_ok());
     }
 
